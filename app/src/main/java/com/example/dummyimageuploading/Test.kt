@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -92,7 +93,7 @@ fun test(){
         )
         Button(onClick = {
             imageRef?.let { uri ->
-                uploadImageToCloudinary(context, uri, "346939552412259", "c4lBSFh9s2NjEX2KGvHlN2OmRIE", "thread")
+                uploadImageToCloudinary(context, uri,  "thread")
             }
         }) {
             Text("Upload")
@@ -100,60 +101,31 @@ fun test(){
     }
 }
 
-fun generateSignature(params: Map<String, String>, apiSecret: String): String {
-    val sortedParams = params.toSortedMap()
-    val paramString = sortedParams.entries.joinToString("&") { "${it.key}=${it.value}" }
-    val stringToSign = "$paramString$apiSecret"
-    val md = MessageDigest.getInstance("SHA-256")
-    val hash = md.digest(stringToSign.toByteArray())
-    return hash.joinToString("") { "%02x".format(it) }
-}
+fun uploadImageToCloudinary(context: Context, imageUri: Uri, uploadPreset: String) {
+    val cloudName = "dixcja6yr"
+    val contentResolver = context.contentResolver
+    val inputStream = contentResolver.openInputStream(imageUri)
+    val file = File(context.cacheDir, "temp_image.jpg").apply {
+        outputStream().use { inputStream?.copyTo(it) }
+    }
 
-fun uploadImageToCloudinary(
-    context: Context,
-    imageUri: Uri,
-    apiKey: String,
-    apiSecret: String,
-    uploadPreset: String
-) {
+    val requestFile = RequestBody.create("image/jpeg".toMediaTypeOrNull(), file)
+    val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
+    val presetRequestBody = RequestBody.create("text/plain".toMediaTypeOrNull(), uploadPreset)
+
     CoroutineScope(Dispatchers.IO).launch {
         try {
-            // Convert URI to File
-            val inputStream = context.contentResolver.openInputStream(imageUri)
-            val file = File.createTempFile("upload", ".jpg", context.cacheDir)
-            println("file "+ file)
-            file.outputStream().use { inputStream?.copyTo(it) }
-
-            // Generate Cloudinary Signature
-            val timestamp = (System.currentTimeMillis() / 1000).toString()
-            val signatureParams = mapOf(
-                "timestamp" to timestamp,
-                "upload_preset" to uploadPreset
-            )
-            val signature = generateSignature(signatureParams, apiSecret)
-            println("signature "+ signature)
-
-
-            // Create MultipartBody for the image
-            val requestBody = RequestBody.create("image/*".toMediaTypeOrNull(), file)
-            println("requestBody " +requestBody)
-            val multipartBody = MultipartBody.Part.createFormData("file", file.name, requestBody)
-            println("multipartBody " +multipartBody)
-
-            // Call Cloudinary API
-            val response = RetrofitInstance.api.uploadImage(
-                multipartBody,
-                apiKey,
-                timestamp,
-                signature,
-                uploadPreset
-            )
-            println("response "+ response)
-
-            // Log the response
-            println("Image uploaded successfully: ${response.secure_url}")
+            val api = RetrofitInstance.getClient()
+            val response = api.uploadImage(cloudName, body, presetRequestBody)
+            if (response.isSuccessful) {
+                val cloudinaryResponse = response.body()
+                val secureUrl = cloudinaryResponse?.secure_url
+                println("secureUrl" + secureUrl)
+            } else {
+                Log.e("Cloudinary", "Error: ${response.errorBody()?.string()}")
+            }
         } catch (e: Exception) {
-            println("Error uploading image: ${e.message}")
+            Log.e("Cloudinary", "Exception: ${e.message}")
         }
     }
 }
